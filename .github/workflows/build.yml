@@ -1,0 +1,124 @@
+name: Build apps
+
+# 저장소에는 app.zip(앱 파일 전체)과 이 파일만 있으면 됩니다. 각 작업이 시작할 때 app.zip을 풉니다.
+# main 브랜치에 올릴 때마다:
+#  1) APK 빌드
+#  2) GitHub Releases 에 workout-log.apk 업로드 (홈페이지 다운로드 버튼이 가리키는 파일)
+#  3) site/ 홈페이지 + www/ 웹앱(아이폰용, site/app/)을 GitHub Pages로 배포
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack app.zip
+        run: unzip -o -q app.zip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install
+        run: npm install
+      - name: Create Android project
+        run: |
+          npx cap add android
+          npx cap sync android
+      - name: Apply app icon
+        continue-on-error: true
+        run: |
+          python3 -m pip install --break-system-packages pillow || python3 -m pip install pillow
+          python3 resources/apply_icon.py
+      - name: Set version
+        run: |
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+      - name: Use fixed signing key (so new versions install over old ones)
+        run: |
+          mkdir -p ~/.android
+          cp resources/debug.keystore ~/.android/debug.keystore
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../workout-log.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workout-log-apk
+          path: workout-log.apk
+      - name: Publish to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: 운동기록 1.0.${{ github.run_number }}
+          files: workout-log.apk
+          make_latest: true
+
+  site:
+    name: Homepage (GitHub Pages)
+    needs: android
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack app.zip
+        run: unzip -o -q app.zip
+      - name: Put the web app (iPhone) under site/app
+        run: |
+          rm -rf site/app
+          cp -r www site/app
+          sed -i "s/const VERSION = 'v1';/const VERSION = 'v${{ github.run_number }}';/" site/app/sw.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  ios:
+    name: iOS build check (simulator)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack app.zip
+        run: unzip -o -q app.zip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm install
+      - name: Create iOS project
+        run: |
+          npx cap add ios
+          npx cap sync ios
+      - name: Apply app icon
+        continue-on-error: true
+        run: |
+          python3 -m pip install --break-system-packages pillow || python3 -m pip install pillow
+          python3 resources/apply_icon.py
+      - name: Build for simulator (no signing)
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App \
+            -configuration Debug -sdk iphonesimulator \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
