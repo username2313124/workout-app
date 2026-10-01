@@ -1,6 +1,6 @@
 name: Build apps
 
-# 저장소에는 app.zip(앱 파일 전체)과 이 파일만 있으면 됩니다. 각 작업이 시작할 때 app.zip을 풉니다.
+# 저장소에는 app.zip(또는 app_1.zip 등, 앱 파일 전체)과 이 파일만 있으면 됩니다. 각 작업이 시작할 때 zip을 풉니다.
 # main 브랜치에 올릴 때마다:
 #  1) APK 빌드
 #  2) GitHub Releases 에 workout-log.apk 업로드 (홈페이지 다운로드 버튼이 가리키는 파일)
@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Unpack app.zip
-        run: unzip -o -q app.zip
+        run: for z in app*.zip; do unzip -o -q "$z"; done
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Unpack app.zip
-        run: unzip -o -q app.zip
+        run: for z in app*.zip; do unzip -o -q "$z"; done
       - name: Put the web app (iPhone) under site/app
         run: |
           rm -rf site/app
@@ -102,7 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Unpack app.zip
-        run: unzip -o -q app.zip
+        run: for z in app*.zip; do unzip -o -q "$z"; done
       - uses: actions/setup-node@v4
         with:
           node-version: 22
